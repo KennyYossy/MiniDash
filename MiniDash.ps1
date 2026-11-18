@@ -159,18 +159,11 @@ function Get-ProcTimes {
 
 # --- 行を作る
 $sysDrive = $env:SystemDrive
-# 製品名を短くする（例: "AMD Ryzen 7 7840HS w/ Radeon 780M Graphics" -> "Ryzen 7 7840HS"）
-function Get-ShortName([string]$n) {
-    $n = $n -replace '\((R|TM|tm|r)\)', '' -replace '\s+w/.*$', '' -replace '\s+with\s+Radeon.*$', '' `
-            -replace '\s+\d+-Core\s+Processor.*$', '' -replace '\s+CPU\s*@.*$', '' -replace '\s+@\s*[\d.]+\s*GHz.*$', '' `
-            -replace '\s+Processor$', '' -replace '^\d+(st|nd|rd|th)\s+Gen\s+', '' -replace '^(AMD|Intel)\s+', '' -replace 'NVIDIA\s+GeForce\s+', '' -replace '\s+Laptop\s+GPU', ''
-    ($n -replace '\s+', ' ').Trim()
-}
-$cpuFull = 'CPU'
+# CPUの製品名（カーソルを合わせたときに表示）
+$cpuFull = $null
 try { $cpuFull = (Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0').ProcessorNameString.Trim() } catch {}
-$cpuShort = Get-ShortName $cpuFull; if (-not $cpuShort) { $cpuShort = 'CPU' }
 
-$rowCpu  = New-MeterRow $cpuShort $cpuFull
+$rowCpu  = New-MeterRow 'CPU' $cpuFull
 $rowMem  = New-MeterRow 'Memory'
 $gpuRows = @()
 $gpuList = @()
@@ -180,12 +173,16 @@ if ($gpuOk) {
 # 内蔵GPUはCPUと同じチップなので、その温度をCPU欄に表示する
 $apuLuid = $null
 foreach ($g in $gpuList) { if ($g.Integrated) { $apuLuid = $g.Luid; break } }
+# ラベルは CPU / iGPU / GPU。製品名はカーソルを合わせると表示
+$dGpuCount = @($gpuList | Where-Object { -not $_.Integrated }).Count
+$dGpuNo = 0
 foreach ($g in $gpuList) {
-    $short = Get-ShortName $g.Name
-    # "Radeon Graphics" のような汎用名なら、CPU名に書かれた型番（例: Radeon 780M）を使う
-    if ($g.Integrated -and $short -match '^Radeon\s+Graphics$' -and $cpuFull -match '(Radeon\s+\S+)\s+Graphics') { $short = $Matches[1] }
-    if (-not $short) { $short = 'GPU' }
-    $r = New-MeterRow $short $g.Name
+    if ($g.Integrated) { $label = 'iGPU' }
+    else { $dGpuNo++; $label = if ($dGpuCount -gt 1) { "GPU $dGpuNo" } else { 'GPU' } }
+    $tip = $g.Name
+    # "AMD Radeon(TM) Graphics" のような汎用名には、CPU名に書かれた型番（例: Radeon 780M）を添える
+    if ($g.Integrated -and $g.Name -match 'Radeon\(TM\) Graphics$|^AMD Radeon Graphics$' -and $cpuFull -match '(Radeon\s+\S+)\s+Graphics') { $tip = "$($g.Name)  ($($Matches[1]))" }
+    $r = New-MeterRow $label $tip
     $r | Add-Member Luid $g.Luid
     $r | Add-Member Integrated $g.Integrated
     $gpuRows += $r

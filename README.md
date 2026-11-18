@@ -10,14 +10,15 @@
 
 ### 表示される内容（2秒ごとに更新）
 
-- **CPU**：製品名、使用率、温度（内蔵GPUがあるCPUの場合）
+- **CPU**：使用率と温度（内蔵GPUがあるCPUの場合）
 - **Memory**：使用量／搭載量
-- **GPU**：GPUごとの製品名、使用率、温度、専用メモリ（NVIDIA・AMD・Intel）。GPUが検出できないPCでは表示されません
+- **GPU**：GPUごとの使用率、温度、専用メモリ（NVIDIA・AMD・Intel）。内蔵GPUは「iGPU」と表示されます。GPUが検出できないPCでは表示されません
 - **Disk**：システムドライブの空き容量
 - **Net**：下り／上りの通信速度
 - **Battery**：残量（ノートPCのみ）
 - **CPUを多く使っているアプリ上位3つ**（同じ名前のプロセスは合算）
 
+CPU・GPUの名前にカーソルを合わせると、製品名が表示されます。
 バーの色は使用率で変わります（60%未満は緑、85%未満は黄、それ以上は赤）。
 
 ### インストール
@@ -66,14 +67,15 @@ A tiny always-on-top system monitor for Windows that sits in the bottom-right co
 
 ### What it shows (updated every 2 seconds)
 
-- **CPU**: model name, usage, and temperature (on CPUs with integrated graphics)
+- **CPU**: usage and temperature (on CPUs with integrated graphics)
 - **Memory**: used / installed
-- **GPU**: model name, usage, temperature, and dedicated memory for each GPU (NVIDIA, AMD, Intel). Hidden if no GPU is detected
+- **GPU**: usage, temperature, and dedicated memory for each GPU (NVIDIA, AMD, Intel). Integrated graphics is labeled "iGPU". Hidden if no GPU is detected
 - **Disk**: free space on the system drive
 - **Net**: download / upload speed
 - **Battery**: charge level (laptops only)
 - **Top 3 apps by CPU usage** (processes with the same name are combined)
 
+Hover over a CPU or GPU label to see the model name.
 Bar colors change with load: green below 60%, yellow below 85%, red above.
 
 ### Install
