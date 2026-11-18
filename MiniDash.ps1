@@ -40,9 +40,14 @@ public static class MiniDashNative {
 }
 "@
 }
-if (-not ('MiniDashGpu' -as [type])) {
-    Add-Type -TypeDefinition (Get-Content (Join-Path $PSScriptRoot 'MiniDashGpu.cs') -Raw -Encoding UTF8)
-}
+# GPU部分は読み込めなくても他の表示は続ける
+$gpuOk = $false
+try {
+    if (-not ('MiniDashGpu' -as [type])) {
+        Add-Type -TypeDefinition (Get-Content (Join-Path $PSScriptRoot 'MiniDashGpu.cs') -Raw -Encoding UTF8)
+    }
+    $gpuOk = $true
+} catch { Add-Content -Path $logFile -Value ("{0}  GPU module load  {1}" -f (Get-Date), $_) }
 
 $PanelWidth = 186.0
 
@@ -95,12 +100,13 @@ foreach ($n in 'Rows','NetText','BattRow','BattText','ProcText','DetailBtn') { $
 $ui.DetailBtn.Add_Click({ Start-Process taskmgr.exe })
 
 # 1行 = ラベル + 値(右寄せ) + 細いバー
-function New-MeterRow([string]$label) {
+function New-MeterRow([string]$label, [string]$tip) {
     $rowXaml = @"
 <StackPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Margin="0,5,0,0">
   <Grid>
-    <TextBlock Foreground="#A8ADBD"/>
-    <TextBlock HorizontalAlignment="Right"><Run FontWeight="SemiBold"/><Run/><Run/></TextBlock>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <TextBlock Foreground="#A8ADBD" TextTrimming="CharacterEllipsis" Margin="0,0,6,0"/>
+    <TextBlock Grid.Column="1" HorizontalAlignment="Right"><Run FontWeight="SemiBold"/><Run/><Run/></TextBlock>
   </Grid>
   <Grid Height="3" Margin="0,2,0,0">
     <Border Background="#30FFFFFF" CornerRadius="1.5"/>
@@ -110,6 +116,7 @@ function New-MeterRow([string]$label) {
 "@
     $row = [Windows.Markup.XamlReader]::Parse($rowXaml)
     $row.Children[0].Children[0].Text = $label
+    if ($tip) { $row.Children[0].Children[0].ToolTip = $tip }
     [void]$ui.Rows.Children.Add($row)
     $tb = $row.Children[0].Children[1]
     $runs = @($tb.Inlines)
@@ -152,20 +159,33 @@ function Get-ProcTimes {
 
 # --- 行を作る
 $sysDrive = $env:SystemDrive
-$rowCpu  = New-MeterRow 'CPU'
+# 製品名を短くする（例: "AMD Ryzen 7 7840HS w/ Radeon 780M Graphics" -> "Ryzen 7 7840HS"）
+function Get-ShortName([string]$n) {
+    $n = $n -replace '\((R|TM|tm|r)\)', '' -replace '\s+w/.*$', '' -replace '\s+with\s+Radeon.*$', '' `
+            -replace '\s+\d+-Core\s+Processor.*$', '' -replace '\s+CPU\s*@.*$', '' -replace '\s+@\s*[\d.]+\s*GHz.*$', '' `
+            -replace '\s+Processor$', '' -replace '^\d+(st|nd|rd|th)\s+Gen\s+', '' -replace '^(AMD|Intel)\s+', '' -replace 'NVIDIA\s+GeForce\s+', '' -replace '\s+Laptop\s+GPU', ''
+    ($n -replace '\s+', ' ').Trim()
+}
+$cpuFull = 'CPU'
+try { $cpuFull = (Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0').ProcessorNameString.Trim() } catch {}
+$cpuShort = Get-ShortName $cpuFull; if (-not $cpuShort) { $cpuShort = 'CPU' }
+
+$rowCpu  = New-MeterRow $cpuShort $cpuFull
 $rowMem  = New-MeterRow 'Memory'
 $gpuRows = @()
 $gpuList = @()
-try { $gpuList = @([MiniDashGpu]::Init()) } catch { Add-Content -Path $logFile -Value ("{0}  GPU init  {1}" -f (Get-Date), $_) }
+if ($gpuOk) {
+    try { $gpuList = @([MiniDashGpu]::Init()) } catch { Add-Content -Path $logFile -Value ("{0}  GPU init  {1}" -f (Get-Date), $_) }
+}
 # 内蔵GPUはCPUと同じチップなので、その温度をCPU欄に表示する
-$apuLuid = ($gpuList | Where-Object Integrated | Select-Object -First 1).Luid
+$apuLuid = $null
+foreach ($g in $gpuList) { if ($g.Integrated) { $apuLuid = $g.Luid; break } }
 foreach ($g in $gpuList) {
-    if ($g.Integrated) { $short = 'iGPU' }
-    else {
-        $short = $g.Name -replace '\(TM\)|\(R\)', '' -replace 'NVIDIA GeForce ', '' -replace 'Laptop GPU', '' -replace '^AMD Radeon ', '' -replace '^Intel ', '' -replace '\s+', ' '
-        $short = $short.Trim(); if ($short.Length -gt 12) { $short = $short.Substring(0, 11) + [char]0x2026 }
-    }
-    $r = New-MeterRow $short
+    $short = Get-ShortName $g.Name
+    # "Radeon Graphics" のような汎用名なら、CPU名に書かれた型番（例: Radeon 780M）を使う
+    if ($g.Integrated -and $short -match '^Radeon\s+Graphics$' -and $cpuFull -match '(Radeon\s+\S+)\s+Graphics') { $short = $Matches[1] }
+    if (-not $short) { $short = 'GPU' }
+    $r = New-MeterRow $short $g.Name
     $r | Add-Member Luid $g.Luid
     $r | Add-Member Integrated $g.Integrated
     $gpuRows += $r
@@ -197,7 +217,7 @@ $update = {
 
         # GPU（使用率はタスクマネージャーと同じく、エンジン種別ごとの最大値）
         if ($gpuRows.Count -gt 0) {
-            $gs = [MiniDashGpu]::Sample()
+            $gs = @(); try { $gs = @([MiniDashGpu]::Sample()) } catch {}
             foreach ($r in $gpuRows) {
                 $g = $gs | Where-Object { $_.Luid -eq $r.Luid } | Select-Object -First 1
                 if (-not $g) { continue }
